@@ -11,8 +11,8 @@ export function runFalsePositiveReview(aiResults) {
         status: "FALSE_POSITIVE",
         falseReason:
           item.isExploitable === false
-            ? "AI 분석에서 실제 공격 경로가 확인되지 않았습니다."
-            : "낮은 위험도이거나 테스트/예제 코드로 추정되어 우선순위를 낮췄습니다.",
+            ? "No realistic attack path was confirmed during AI review."
+            : "This looks low risk or appears to be test/demo code, so it was deprioritized.",
       };
     }
 

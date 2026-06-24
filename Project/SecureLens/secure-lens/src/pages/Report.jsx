@@ -5,6 +5,7 @@ import { Box, Button, Card, CardContent, Chip, Typography } from "@mui/material"
 
 import DownloadIcon from "@mui/icons-material/Download";
 
+import PageHeader from "../components/PageHeader";
 import {
   getAiResults,
   getFalsePositiveResults,
@@ -37,6 +38,11 @@ export default function Report() {
 
   return (
     <Box>
+      <PageHeader
+        title="Security Report"
+        subtitle="Generate a shareable summary of the latest SecureLens analysis results."
+      />
+
       <Button
         variant="contained"
         startIcon={<DownloadIcon />}
@@ -48,7 +54,7 @@ export default function Report() {
 
       <Card id="report">
         <CardContent>
-          <Typography variant="h4" mb={3}>
+          <Typography variant="h5" mb={3}>
             SecureLens Report
           </Typography>
 
@@ -80,16 +86,22 @@ export default function Report() {
               const info = getVulnerabilityInfo(vuln.type);
 
               return (
-                <Card key={`${vuln.filePath}-${vuln.line}-${index}`} sx={{ p: 2, mb: 2 }}>
-                  <Typography fontWeight="bold">{vuln.type}</Typography>
-                  <Typography color="text.secondary">
+                <Card key={`${vuln.filePath}-${vuln.line}-${index}`} sx={{ p: 2, mb: 2, minWidth: 0 }}>
+                  <Typography fontWeight="bold" sx={{ overflowWrap: "anywhere" }}>
+                    {vuln.type}
+                  </Typography>
+                  <Typography color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
                     {vuln.filePath}:{vuln.line}
                   </Typography>
                   <Typography>Severity: {vuln.severity}</Typography>
                   <Typography>CWE: {vuln.cwe || info.cwe}</Typography>
-                  <Typography>Summary: {info.summary}</Typography>
-                  <Typography>Attack Path: {vuln.attackPath || info.scenario}</Typography>
-                  <Typography>Fix: {vuln.fix || info.fix.join(", ")}</Typography>
+                  <Typography sx={{ overflowWrap: "anywhere" }}>Summary: {info.summary}</Typography>
+                  <Typography sx={{ overflowWrap: "anywhere" }}>
+                    Attack Path: {vuln.attackPath || info.scenario}
+                  </Typography>
+                  <Typography sx={{ overflowWrap: "anywhere" }}>
+                    Fix: {vuln.fix || info.fix.join(", ")}
+                  </Typography>
                 </Card>
               );
             })

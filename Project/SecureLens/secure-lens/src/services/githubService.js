@@ -14,10 +14,10 @@ const SUPPORTED_EXTENSIONS = [
 
 export function parseGitHubUrl(repoUrl) {
   try {
-    const url = new URL(repoUrl);
+    const url = new URL(repoUrl.trim());
     const [, owner, repo] = url.pathname.split("/");
 
-    if (!owner || !repo || url.hostname !== "github.com") {
+    if (!owner || !repo || !url.hostname.endsWith("github.com")) {
       throw new Error();
     }
 
@@ -26,7 +26,7 @@ export function parseGitHubUrl(repoUrl) {
       repo: repo.replace(/\.git$/, ""),
     };
   } catch {
-    throw new Error("올바른 GitHub 저장소 URL을 입력하세요.");
+    throw new Error("Enter a valid GitHub repository URL.");
   }
 }
 
@@ -37,10 +37,36 @@ export function isSupportedFile(path) {
 }
 
 async function requestGitHub(url) {
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
 
   if (!response.ok) {
-    throw new Error("GitHub 저장소에 접근할 수 없습니다.");
+    let message = "GitHub request failed.";
+
+    try {
+      const data = await response.json();
+      message = data.message || message;
+    } catch {
+      // Keep the generic message when GitHub does not return JSON.
+    }
+
+    if (response.status === 403) {
+      throw new Error(
+        `${message} GitHub API rate limit may have been reached. Try again later or use a smaller demo repository.`,
+      );
+    }
+
+    if (response.status === 404) {
+      throw new Error(
+        `${message} Check whether the repository exists and is public.`,
+      );
+    }
+
+    throw new Error(`${message} (GitHub status ${response.status})`);
   }
 
   return response.json();
@@ -56,9 +82,10 @@ export async function fetchContents(owner, repo, path = "") {
     .filter(Boolean)
     .map(encodeURIComponent)
     .join("/");
+  const suffix = encodedPath ? `/${encodedPath}` : "";
 
   return requestGitHub(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`,
+    `https://api.github.com/repos/${owner}/${repo}/contents${suffix}`,
   );
 }
 
@@ -66,7 +93,7 @@ export async function fetchFileContent(owner, repo, path) {
   const data = await fetchContents(owner, repo, path);
 
   if (!data.content) {
-    throw new Error("파일 내용을 불러올 수 없습니다.");
+    throw new Error("Unable to load file content.");
   }
 
   const binary = atob(data.content.replace(/\n/g, ""));
@@ -75,8 +102,33 @@ export async function fetchFileContent(owner, repo, path) {
   return new TextDecoder("utf-8").decode(bytes);
 }
 
-export async function collectRepositoryFiles(owner, repo, path = "", limit = 40) {
+export async function fetchRepositoryTree(owner, repo, branch = "HEAD") {
+  const data = await requestGitHub(
+    `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+  );
+
+  return (data.tree || [])
+    .filter((item) => item.type === "blob" && isSupportedFile(item.path))
+    .map((item) => ({
+      name: item.path.split("/").pop(),
+      path: item.path,
+      size: item.size,
+    }));
+}
+
+export async function collectRepositoryFiles(
+  owner,
+  repo,
+  path = "",
+  limit = 40,
+  branch = "HEAD",
+) {
   const collected = [];
+
+  if (!path) {
+    const treeFiles = await fetchRepositoryTree(owner, repo, branch);
+    return treeFiles.slice(0, limit);
+  }
 
   async function walk(currentPath) {
     if (collected.length >= limit) return;

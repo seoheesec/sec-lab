@@ -76,6 +76,7 @@ export default function AppLayout({ children }) {
 
           "& .MuiDrawer-paper": {
             width: drawerWidth,
+            boxSizing: "border-box",
             background:
               "linear-gradient(180deg, rgba(15,23,42,.98), rgba(2,6,23,.98))",
             borderRight: "1px solid rgba(96,165,250,.16)",
@@ -181,6 +182,7 @@ export default function AppLayout({ children }) {
       <Box
         sx={{
           flexGrow: 1,
+          minWidth: 0,
           p: { xs: 2.5, md: 4 },
           minHeight: "100vh",
           background:

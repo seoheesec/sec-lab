@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { Box, Button, Card, CardContent, Chip, Typography } from "@mui/material";
 
+import PageHeader from "../components/PageHeader";
 import { runFalsePositiveReview } from "../services/falsePositiveService";
 import {
   getAiResults,
@@ -24,9 +25,10 @@ export default function FalsePositive() {
 
   return (
     <Box>
-      <Typography variant="h4" mb={3}>
-        False Positive Review
-      </Typography>
+      <PageHeader
+        title="False Positive Review"
+        subtitle="Filter AI-reviewed findings so the final dashboard and report focus on actionable vulnerabilities."
+      />
 
       <Button variant="contained" onClick={handleReview}>
         Start Review
@@ -34,24 +36,28 @@ export default function FalsePositive() {
 
       {results.length === 0 ? (
         <Typography color="text.secondary" sx={{ mt: 3 }}>
-          AI 분석 결과를 기준으로 오탐 여부를 검토합니다.
+          Run this after AI analysis to classify real findings and likely false positives.
         </Typography>
       ) : (
         results.map((item, index) => (
-          <Card key={`${item.filePath}-${item.line}-${index}`} sx={{ mt: 2 }}>
+          <Card key={`${item.filePath}-${item.line}-${index}`} sx={{ mt: 2, minWidth: 0 }}>
             <CardContent>
-              <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
-                <Typography variant="h6">{item.type}</Typography>
+              <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
+                <Typography variant="h6" sx={{ overflowWrap: "anywhere" }}>
+                  {item.type}
+                </Typography>
                 <Chip
                   color={item.status === "REAL" ? "error" : "default"}
                   label={item.status}
                 />
               </Box>
-              <Typography color="text.secondary">
+              <Typography color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
                 {item.filePath}:{item.line}
               </Typography>
               <Typography>Severity: {item.severity}</Typography>
-              {item.falseReason && <Typography>{item.falseReason}</Typography>}
+              {item.falseReason && (
+                <Typography sx={{ overflowWrap: "anywhere" }}>{item.falseReason}</Typography>
+              )}
             </CardContent>
           </Card>
         ))

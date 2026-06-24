@@ -9,4 +9,6 @@ Expected findings:
 - Sensitive Data Storage
 - Hardcoded Secret
 - Hardcoded API Key
-
+- Python Exec Injection
+- Unsafe Deserialization
+- Command Injection

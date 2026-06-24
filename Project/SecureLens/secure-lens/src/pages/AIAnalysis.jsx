@@ -12,6 +12,7 @@ import {
 
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 
+import PageHeader from "../components/PageHeader";
 import { runAIAnalysis } from "../services/aiAnalysisService";
 import { getStaticResults, saveAiResults } from "../services/storageService";
 
@@ -24,7 +25,7 @@ export default function AIAnalysis() {
     const staticResults = getStaticResults();
 
     if (staticResults.length === 0) {
-      setMessage("먼저 정적 분석을 실행하세요.");
+      setMessage("Run static analysis before AI analysis.");
       return;
     }
 
@@ -36,7 +37,7 @@ export default function AIAnalysis() {
 
       setResults(aiResults);
       saveAiResults(aiResults);
-      setMessage(`${aiResults.length}개 항목의 AI 분석이 완료되었습니다.`);
+      setMessage(`${aiResults.length} findings reviewed by AI.`);
     } finally {
       setLoading(false);
     }
@@ -44,9 +45,10 @@ export default function AIAnalysis() {
 
   return (
     <Box>
-      <Typography variant="h4" mb={3}>
-        AI Analysis
-      </Typography>
+      <PageHeader
+        title="AI Analysis"
+        subtitle="Review static findings with AI-assisted reasoning to estimate exploitability and remediation paths."
+      />
 
       <Card sx={{ mb: 3 }}>
         <CardContent>
@@ -71,19 +73,21 @@ export default function AIAnalysis() {
           </Typography>
 
           {results.length === 0 ? (
-            <Typography color="text.secondary">AI 분석 결과가 없습니다.</Typography>
+            <Typography color="text.secondary">No AI analysis results yet.</Typography>
           ) : (
             results.map((item, index) => (
-              <Card key={`${item.filePath}-${item.line}-${index}`} sx={{ p: 2, mb: 2 }}>
-                <Typography fontWeight="bold">{item.type}</Typography>
-                <Typography color="text.secondary">
+              <Card key={`${item.filePath}-${item.line}-${index}`} sx={{ p: 2, mb: 2, minWidth: 0 }}>
+                <Typography fontWeight="bold" sx={{ overflowWrap: "anywhere" }}>
+                  {item.type}
+                </Typography>
+                <Typography color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
                   {item.filePath}:{item.line}
                 </Typography>
                 <Typography>Exploitable: {item.isExploitable ? "YES" : "NO"}</Typography>
                 <Typography>Severity: {item.severity}</Typography>
-                <Typography>Attack Path: {item.attackPath}</Typography>
-                <Typography>Reason: {item.reason}</Typography>
-                <Typography>Fix: {item.fix}</Typography>
+                <Typography sx={{ overflowWrap: "anywhere" }}>Attack Path: {item.attackPath}</Typography>
+                <Typography sx={{ overflowWrap: "anywhere" }}>Reason: {item.reason}</Typography>
+                <Typography sx={{ overflowWrap: "anywhere" }}>Fix: {item.fix}</Typography>
               </Card>
             ))
           )}

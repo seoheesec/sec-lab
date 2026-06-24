@@ -30,6 +30,7 @@ const theme = createTheme({
     h4: {
       fontWeight: 850,
       letterSpacing: 0,
+      lineHeight: 1.18,
     },
     h5: {
       fontWeight: 800,
@@ -63,6 +64,16 @@ const theme = createTheme({
         },
       },
     },
+    MuiCardContent: {
+      styleOverrides: {
+        root: {
+          padding: 24,
+          "&:last-child": {
+            paddingBottom: 24,
+          },
+        },
+      },
+    },
     MuiButton: {
       styleOverrides: {
         root: {
@@ -87,6 +98,7 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           backgroundColor: "rgba(2,6,23,.38)",
+          borderRadius: 12,
           "& fieldset": {
             borderColor: "rgba(148,163,184,.24)",
           },
@@ -96,6 +108,10 @@ const theme = createTheme({
           "&.Mui-focused fieldset": {
             borderColor: "#60A5FA",
           },
+        },
+        input: {
+          paddingTop: 16,
+          paddingBottom: 16,
         },
       },
     },

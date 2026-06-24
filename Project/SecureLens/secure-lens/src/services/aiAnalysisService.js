@@ -1,18 +1,21 @@
 const API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
 
 function buildFallbackResult(vulnerability) {
-  const file = vulnerability.filePath ? `${vulnerability.filePath}:${vulnerability.line}` : `line ${vulnerability.line}`;
+  const file = vulnerability.filePath
+    ? `${vulnerability.filePath}:${vulnerability.line}`
+    : `line ${vulnerability.line}`;
 
   return {
     ...vulnerability,
     isExploitable: vulnerability.severity !== "LOW",
-    attackPath: `${file}에서 감지된 입력 또는 위험 함수가 보호 로직 없이 실행될 수 있습니다.`,
-    reason: `${vulnerability.type} 패턴이 발견되어 실제 코드 흐름 검토가 필요합니다.`,
-    analysisLog: "API 키가 없거나 AI 응답을 사용할 수 없어 규칙 기반 더미 분석을 사용했습니다.",
+    attackPath: `${file} contains a risky pattern that may be reachable without enough validation or protection.`,
+    reason: `${vulnerability.type} was detected by the static scanner and should be reviewed in the actual code flow.`,
+    analysisLog:
+      "Fallback analysis was used because the AI API key is missing or the AI response was unavailable.",
     fix:
       vulnerability.type === "SQL Injection"
-        ? "Prepared Statement 또는 ORM 파라미터 바인딩을 사용하세요."
-        : "입력값 검증, 안전한 API 대체, 권한 분리 적용을 검토하세요.",
+        ? "Use prepared statements or ORM parameter binding."
+        : "Validate input, replace unsafe APIs, and apply least-privilege boundaries.",
   };
 }
 

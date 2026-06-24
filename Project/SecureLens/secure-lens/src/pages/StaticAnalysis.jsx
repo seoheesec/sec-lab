@@ -12,7 +12,11 @@ import {
 
 import BugReportIcon from "@mui/icons-material/BugReport";
 
-import { demoVulnerableCode } from "../data/demoVulnerableCode";
+import PageHeader from "../components/PageHeader";
+import {
+  demoPythonVulnerableCode,
+  demoVulnerableCode,
+} from "../data/demoVulnerableCode";
 import { analyzeFiles, runStaticAnalysis } from "../services/analysisService";
 import { saveProject, saveStaticResults } from "../services/storageService";
 
@@ -61,6 +65,14 @@ export default function StaticAnalysis() {
     setMessage("Demo vulnerable code loaded. Click Analyze Code to scan it.");
   };
 
+  const loadPythonDemoCode = () => {
+    setProjectName("Demo Python Vulnerable App");
+    setTargetLanguage("Python");
+    setCode(demoPythonVulnerableCode);
+    setResults([]);
+    setMessage("Demo Python vulnerable code loaded. Click Analyze Code to scan it.");
+  };
+
   const handleFileUpload = async (event) => {
     const selectedFiles = Array.from(event.target.files || []);
 
@@ -86,13 +98,21 @@ export default function StaticAnalysis() {
 
   return (
     <Box>
-      <Typography variant="h4" mb={3}>
-        Static Analysis
-      </Typography>
+      <PageHeader
+        title="Static Analysis"
+        subtitle="Paste source code, upload files, or load the demo sample to detect common vulnerability patterns."
+      />
 
       <Card sx={{ mb: 3 }}>
         <CardContent>
-          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 2, mb: 2 }}>
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "1fr", md: "1fr 220px" },
+              gap: 2,
+              mb: 2,
+            }}
+          >
             <TextField
               label="Project Name"
               value={projectName}
@@ -119,7 +139,10 @@ export default function StaticAnalysis() {
               Analyze Code
             </Button>
             <Button variant="outlined" startIcon={<BugReportIcon />} onClick={loadDemoCode}>
-              Load Demo Vulnerable Code
+              Load JS Demo
+            </Button>
+            <Button variant="outlined" startIcon={<BugReportIcon />} onClick={loadPythonDemoCode}>
+              Load Python Demo
             </Button>
             <Button variant="outlined" component="label">
               Upload Files
@@ -141,14 +164,16 @@ export default function StaticAnalysis() {
             <Typography color="text.secondary">No analysis results yet.</Typography>
           ) : (
             results.map((item, index) => (
-              <Card key={`${item.filePath}-${item.line}-${index}`} sx={{ p: 2, mb: 2 }}>
-                <Typography fontWeight="bold">{item.type}</Typography>
-                <Typography color="text.secondary">
+              <Card key={`${item.filePath}-${item.line}-${index}`} sx={{ p: 2, mb: 2, minWidth: 0 }}>
+                <Typography fontWeight="bold" sx={{ overflowWrap: "anywhere" }}>
+                  {item.type}
+                </Typography>
+                <Typography color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
                   {item.filePath}:{item.line}
                 </Typography>
                 <Typography>Severity: {item.severity}</Typography>
                 <Typography>CWE: {item.cwe}</Typography>
-                <Typography>{item.description}</Typography>
+                <Typography sx={{ overflowWrap: "anywhere" }}>{item.description}</Typography>
               </Card>
             ))
           )}

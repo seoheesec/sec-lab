@@ -7,8 +7,6 @@ import {
   Button,
   Card,
   CardContent,
-  Chip,
-  Divider,
   TextField,
   Typography,
 } from "@mui/material";
@@ -16,15 +14,10 @@ import {
 import LockIcon from "@mui/icons-material/Lock";
 import ShieldIcon from "@mui/icons-material/Shield";
 
-import {
-  ensureDemoAdmin,
-  getDemoAdminCredentials,
-  login,
-} from "../services/authService";
+import { ensureDemoAdmin, login } from "../services/authService";
 
 export default function Login() {
   const navigate = useNavigate();
-  const demoAdmin = getDemoAdminCredentials();
   const [form, setForm] = useState({
     id: "",
     password: "",
@@ -43,11 +36,6 @@ export default function Login() {
       ...current,
       [field]: event.target.value,
     }));
-    setMessage("");
-  };
-
-  const fillDemoAdmin = () => {
-    setForm(demoAdmin);
     setMessage("");
   };
 
@@ -115,29 +103,6 @@ export default function Login() {
               </Typography>
             </Box>
           </Box>
-
-          <Box
-            sx={{
-              p: 2,
-              mb: 2,
-              borderRadius: 2,
-              border: "1px solid rgba(96,165,250,.18)",
-              background: "rgba(37,99,235,.1)",
-            }}
-          >
-            <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
-              <Typography fontWeight={800}>Demo admin</Typography>
-              <Chip size="small" label="Ready" />
-            </Box>
-            <Typography color="text.secondary" fontSize={14} sx={{ mt: 1 }}>
-              ID: {demoAdmin.id} / Password: {demoAdmin.password}
-            </Typography>
-            <Button size="small" sx={{ mt: 1, color: "#93C5FD" }} onClick={fillDemoAdmin}>
-              Use demo account
-            </Button>
-          </Box>
-
-          <Divider sx={{ mb: 2 }} />
 
           {message && (
             <Alert severity="error" sx={{ mb: 2 }}>

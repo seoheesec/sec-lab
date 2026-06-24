@@ -1,6 +1,7 @@
 import { Box, Card, CardContent, Chip, Typography } from "@mui/material";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
+import PageHeader from "../components/PageHeader";
 import { getAiResults, getProject, getStaticResults } from "../services/storageService";
 import { getVulnerabilityInfo } from "../services/vulnerabilityInfo";
 
@@ -41,15 +42,26 @@ export default function Dashboard() {
     { name: "LOW", value: lowCount },
   ].filter((item) => item.value > 0);
 
+  const statCards = [
+    ["Total Vulnerabilities", total],
+    ["High Risk", highCount],
+    ["Medium Risk", mediumCount],
+    ["Security Score", score],
+    ["Security Grade", grade],
+  ];
+
   return (
-    <Box>
-      <Typography variant="h4" mb={3}>
-        Security Dashboard
-      </Typography>
+    <Box sx={{ minWidth: 0 }}>
+      <PageHeader
+        title="Security Dashboard"
+        subtitle="Review the current project's risk score, severity distribution, and final vulnerability list."
+      />
 
       <Card sx={{ mb: 3 }}>
         <CardContent>
-          <Typography variant="h6">{project?.name || "No Project"}</Typography>
+          <Typography variant="h6" sx={{ overflowWrap: "anywhere" }}>
+            {project?.name || "No Project"}
+          </Typography>
           <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", mt: 2 }}>
             <Chip label={project?.language || "Language Unknown"} />
             <Chip label={`Scanned Files ${project?.scannedFiles || 0}`} />
@@ -58,39 +70,30 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 2, mb: 3 }}>
-        <Card>
-          <CardContent>
-            <Typography>Total Vulnerabilities</Typography>
-            <Typography variant="h4">{total}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Typography>High Risk</Typography>
-            <Typography variant="h4">{highCount}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Typography>Medium Risk</Typography>
-            <Typography variant="h4">{mediumCount}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Typography>Security Score</Typography>
-            <Typography variant="h4">{score}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Typography>Security Grade</Typography>
-            <Typography variant="h3" fontWeight="bold">
-              {grade}
-            </Typography>
-          </CardContent>
-        </Card>
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: {
+            xs: "1fr",
+            sm: "repeat(2, minmax(0, 1fr))",
+            lg: "repeat(5, minmax(0, 1fr))",
+          },
+          gap: 2,
+          mb: 3,
+        }}
+      >
+        {statCards.map(([label, value]) => (
+          <Card key={label} sx={{ minWidth: 0 }}>
+            <CardContent>
+              <Typography color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
+                {label}
+              </Typography>
+              <Typography variant={label === "Security Grade" ? "h3" : "h4"} fontWeight="bold">
+                {value}
+              </Typography>
+            </CardContent>
+          </Card>
+        ))}
       </Box>
 
       <Card sx={{ mb: 3 }}>
@@ -100,7 +103,7 @@ export default function Dashboard() {
           </Typography>
           <Box sx={{ height: 320 }}>
             {chartData.length === 0 ? (
-              <Typography color="text.secondary">발견된 취약점이 없습니다.</Typography>
+              <Typography color="text.secondary">No vulnerabilities found.</Typography>
             ) : (
               <ResponsiveContainer>
                 <PieChart>
@@ -124,26 +127,39 @@ export default function Dashboard() {
           </Typography>
 
           {finalResults.length === 0 ? (
-            <Typography color="text.secondary">분석 결과가 없습니다.</Typography>
+            <Typography color="text.secondary">No analysis results yet.</Typography>
           ) : (
             finalResults.map((vuln, index) => {
               const info = getVulnerabilityInfo(vuln.type);
 
               return (
-                <Card key={`${vuln.filePath}-${vuln.line}-${index}`} sx={{ p: 2, mb: 2 }}>
-                  <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
-                    <Typography variant="h6" fontWeight="bold">
+                <Card key={`${vuln.filePath}-${vuln.line}-${index}`} sx={{ p: 2, mb: 2, minWidth: 0 }}>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 2,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <Typography variant="h6" fontWeight="bold" sx={{ overflowWrap: "anywhere" }}>
                       {vuln.type}
                     </Typography>
                     <Chip label={vuln.severity} color={vuln.severity === "HIGH" ? "error" : "default"} />
                   </Box>
-                  <Typography color="text.secondary">
+                  <Typography color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
                     {vuln.filePath}:{vuln.line}
                   </Typography>
                   <Typography>CWE: {vuln.cwe || info.cwe}</Typography>
-                  <Typography sx={{ mt: 1 }}>{info.summary}</Typography>
-                  {vuln.attackPath && <Typography sx={{ mt: 1 }}>Attack Path: {vuln.attackPath}</Typography>}
-                  <Typography sx={{ mt: 1 }}>Fix: {vuln.fix || info.fix.join(", ")}</Typography>
+                  <Typography sx={{ mt: 1, overflowWrap: "anywhere" }}>{info.summary}</Typography>
+                  {vuln.attackPath && (
+                    <Typography sx={{ mt: 1, overflowWrap: "anywhere" }}>
+                      Attack Path: {vuln.attackPath}
+                    </Typography>
+                  )}
+                  <Typography sx={{ mt: 1, overflowWrap: "anywhere" }}>
+                    Fix: {vuln.fix || info.fix.join(", ")}
+                  </Typography>
                 </Card>
               );
             })
