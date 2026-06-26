@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -19,17 +19,28 @@ import {
 } from "@mui/material";
 
 import AssessmentIcon from "@mui/icons-material/Assessment";
-import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
-import FactCheckIcon from "@mui/icons-material/FactCheck";
 import FolderIcon from "@mui/icons-material/Folder";
 import GitHubIcon from "@mui/icons-material/GitHub";
 import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 
 import PageHeader from "../components/PageHeader";
-import { analyzeFiles, runStaticAnalysis } from "../services/analysisService";
+import VulnerabilityCard from "../components/VulnerabilityCard";
+import VulnerabilityDetailDialog from "../components/VulnerabilityDetailDialog";
+import {
+  analyzeFiles,
+  detectLanguageFromPath,
+  runStaticAnalysis,
+} from "../services/analysisService";
 import { runAIAnalysis } from "../services/aiAnalysisService";
-import { runFalsePositiveReview } from "../services/falsePositiveService";
+import {
+  isRealFinding,
+  runFalsePositiveReview,
+} from "../services/falsePositiveService";
+import {
+  saveScanFromFindings,
+  updateLatestScanFromFindings,
+} from "../services/scanHistoryService";
 import {
   collectRepositoryFiles,
   fetchContents,
@@ -38,28 +49,83 @@ import {
   parseGitHubUrl,
 } from "../services/githubService";
 import {
+  getGithubConnectState,
   saveAiResults,
   saveFalsePositiveResults,
+  saveGithubConnectState,
   saveProject,
   saveStaticResults,
 } from "../services/storageService";
 
+const maxFileSize = 300 * 1024;
+
+const initialWorkflowStatus = {
+  static: "waiting",
+  ai: "waiting",
+  review: "waiting",
+  report: "waiting",
+};
+
 export default function GithubConnect() {
   const navigate = useNavigate();
-  const [repoUrl, setRepoUrl] = useState("");
-  const [repoData, setRepoData] = useState(null);
-  const [owner, setOwner] = useState("");
-  const [repo, setRepo] = useState("");
-  const [currentPath, setCurrentPath] = useState("");
-  const [files, setFiles] = useState([]);
-  const [selectedFile, setSelectedFile] = useState("");
-  const [fileContent, setFileContent] = useState("");
-  const [analysisResults, setAnalysisResults] = useState([]);
-  const [aiResults, setAiResults] = useState([]);
-  const [reviewResults, setReviewResults] = useState([]);
-  const [message, setMessage] = useState("");
+  const savedState = getGithubConnectState();
+  const [repoUrl, setRepoUrl] = useState(savedState?.repoUrl || "");
+  const [repoData, setRepoData] = useState(savedState?.repoData || null);
+  const [owner, setOwner] = useState(savedState?.owner || "");
+  const [repo, setRepo] = useState(savedState?.repo || "");
+  const [currentPath, setCurrentPath] = useState(savedState?.currentPath || "");
+  const [files, setFiles] = useState(savedState?.files || []);
+  const [selectedFile, setSelectedFile] = useState(savedState?.selectedFile || "");
+  const [fileContent, setFileContent] = useState(savedState?.fileContent || "");
+  const [analysisResults, setAnalysisResults] = useState(savedState?.analysisResults || []);
+  const [aiResults, setAiResults] = useState(savedState?.aiResults || []);
+  const [reviewResults, setReviewResults] = useState(savedState?.reviewResults || []);
+  const [message, setMessage] = useState(
+    savedState?.message || "",
+  );
   const [loading, setLoading] = useState(false);
-  const [activeStage, setActiveStage] = useState("connect");
+  const [scanProgress, setScanProgress] = useState(null);
+  const [workflowStatus, setWorkflowStatus] = useState(
+    savedState?.workflowStatus || initialWorkflowStatus,
+  );
+  const [analysisLanguage, setAnalysisLanguage] = useState(
+    savedState?.analysisLanguage || "",
+  );
+  const [selectedVulnerability, setSelectedVulnerability] = useState(null);
+
+  useEffect(() => {
+    saveGithubConnectState({
+      repoUrl,
+      repoData,
+      owner,
+      repo,
+      currentPath,
+      files,
+      selectedFile,
+      fileContent,
+      analysisResults,
+      aiResults,
+      reviewResults,
+      message,
+      workflowStatus,
+      analysisLanguage,
+    });
+  }, [
+    aiResults,
+    analysisLanguage,
+    analysisResults,
+    currentPath,
+    fileContent,
+    files,
+    message,
+    owner,
+    repo,
+    repoData,
+    repoUrl,
+    reviewResults,
+    selectedFile,
+    workflowStatus,
+  ]);
 
   const loadContents = async (ownerName, repoName, path = "") => {
     const data = await fetchContents(ownerName, repoName, path);
@@ -68,9 +134,25 @@ export default function GithubConnect() {
     setCurrentPath(path);
   };
 
+  const resetResults = () => {
+    setAnalysisResults([]);
+    setAiResults([]);
+    setReviewResults([]);
+    setSelectedFile("");
+    setFileContent("");
+    setAnalysisLanguage("");
+    setWorkflowStatus({
+      static: "ready",
+      ai: "waiting",
+      review: "waiting",
+      report: "waiting",
+    });
+  };
+
   const handleConnect = async () => {
     try {
       setLoading(true);
+      setScanProgress(null);
       setMessage("");
 
       const parsed = parseGitHubUrl(repoUrl);
@@ -81,10 +163,8 @@ export default function GithubConnect() {
       setOwner(canonicalOwner);
       setRepo(canonicalRepo);
       setRepoData(repository);
-      setAnalysisResults([]);
-      setAiResults([]);
-      setReviewResults([]);
-      setActiveStage("static");
+      resetResults();
+      setAnalysisLanguage(repository.language || "Unknown");
       saveProject({
         owner: canonicalOwner,
         repo: canonicalRepo,
@@ -96,7 +176,7 @@ export default function GithubConnect() {
 
       try {
         await loadContents(canonicalOwner, canonicalRepo);
-        setMessage("Repository connected. Run static analysis to start the workflow.");
+        setMessage("Repository connected. Click Run Full Workflow to analyze it.");
       } catch (contentError) {
         setFiles([]);
         setMessage(
@@ -118,9 +198,23 @@ export default function GithubConnect() {
     }
   };
 
+  // 정적 분석 결과를 공통 저장소와 마이페이지 히스토리에 함께 저장합니다.
+  const saveStaticFindingSet = ({ fileName, vulnerabilities }) => {
+    saveStaticResults(vulnerabilities);
+    saveAiResults([]);
+    saveFalsePositiveResults([]);
+    saveScanFromFindings({
+      fileName,
+      vulnerabilities,
+    });
+  };
+
   const handleFileClick = async (path) => {
     try {
       setLoading(true);
+      setScanProgress(null);
+      const language = detectLanguageFromPath(path);
+
       const content = await fetchFileContent(owner, repo, path);
       const result = runStaticAnalysis(content).map((item) => ({
         ...item,
@@ -130,11 +224,30 @@ export default function GithubConnect() {
 
       setSelectedFile(path);
       setFileContent(content);
+      setAnalysisLanguage(language);
       setAnalysisResults(result);
       setAiResults([]);
       setReviewResults([]);
-      saveStaticResults(result);
-      setActiveStage("ai");
+      saveStaticFindingSet({
+        fileName: path,
+        vulnerabilities: result,
+      });
+      saveProject({
+        owner,
+        repo,
+        url: repoData.html_url,
+        name: path.split("/").pop(),
+        language,
+        scannedFiles: 1,
+        scanDuration: 0,
+        analyzedAt: new Date().toISOString(),
+      });
+      setWorkflowStatus({
+        static: "done",
+        ai: result.length > 0 ? "ready" : "waiting",
+        review: "waiting",
+        report: "waiting",
+      });
       setMessage(`${result.length} static findings detected in ${path}.`);
     } catch (error) {
       setMessage(error.message || "Unable to load the file.");
@@ -143,130 +256,311 @@ export default function GithubConnect() {
     }
   };
 
-  const handleAnalyzeRepository = async () => {
-    try {
-      setLoading(true);
-      setMessage("Collecting supported source files from the repository.");
+  const handleDirectoryClick = async (path) => {
+    setSelectedFile("");
+    setFileContent("");
+    setAnalysisResults([]);
+    setAiResults([]);
+    setReviewResults([]);
+    setWorkflowStatus({
+      static: "ready",
+      ai: "waiting",
+      review: "waiting",
+      report: "waiting",
+    });
+    await loadContents(owner, repo, path);
+    setMessage(`Folder selected. Run Full Workflow to scan files inside ${path}.`);
+  };
 
-      const repositoryFiles = await collectRepositoryFiles(
-        owner,
-        repo,
-        "",
-        40,
-        repoData.default_branch || "HEAD",
-      );
-      const filesWithContent = [];
+  const runSelectedFileStaticAnalysis = () => {
+    const startedAt = performance.now();
+    const vulnerabilities = runStaticAnalysis(fileContent).map((item) => ({
+      ...item,
+      filePath: selectedFile,
+      fileName: selectedFile.split("/").pop(),
+    }));
+    const scanDuration = Number(((performance.now() - startedAt) / 1000).toFixed(2));
+    const language = detectLanguageFromPath(selectedFile);
+    const severityCounts = vulnerabilities.reduce(
+      (counts, item) => ({
+        ...counts,
+        [item.severity]: (counts[item.severity] || 0) + 1,
+      }),
+      { HIGH: 0, MEDIUM: 0, LOW: 0 },
+    );
 
-      for (const file of repositoryFiles) {
+    saveStaticFindingSet({
+      fileName: selectedFile,
+      vulnerabilities,
+    });
+    saveProject({
+      owner,
+      repo,
+      url: repoData.html_url,
+      name: selectedFile.split("/").pop(),
+      language,
+      scannedFiles: 1,
+      scanDuration,
+      severityCounts,
+      analyzedAt: new Date().toISOString(),
+    });
+    setAnalysisLanguage(language);
+
+    return {
+      vulnerabilities,
+      language,
+      scanFileName: selectedFile,
+      scannedFiles: 1,
+      scanDuration,
+      severityCounts,
+      skippedLargeFiles: 0,
+      skippedUnreadableFiles: 0,
+    };
+  };
+
+  const runRepositoryStaticAnalysis = async () => {
+    const targetPath = currentPath || "";
+    const targetName = targetPath || repoData.name;
+
+    setScanProgress(null);
+    setMessage(
+      targetPath
+        ? `Collecting supported source files from ${targetPath}.`
+        : "Collecting supported source files from the repository.",
+    );
+
+    const repositoryFiles = await collectRepositoryFiles(
+      owner,
+      repo,
+      targetPath,
+      40,
+      repoData.default_branch || "HEAD",
+    );
+    const eligibleFiles = repositoryFiles.filter(
+      (file) => !file.size || file.size <= maxFileSize,
+    );
+    const skippedLargeFiles = repositoryFiles.length - eligibleFiles.length;
+    const filesWithContent = [];
+    let skippedUnreadableFiles = 0;
+
+    for (let index = 0; index < eligibleFiles.length; index += 1) {
+      const file = eligibleFiles[index];
+
+      setScanProgress({
+        current: index + 1,
+        total: eligibleFiles.length,
+        fileName: file.path,
+        skippedLargeFiles,
+      });
+
+      try {
         const content = await fetchFileContent(owner, repo, file.path);
         filesWithContent.push({
           path: file.path,
           name: file.name,
           content,
         });
+      } catch {
+        skippedUnreadableFiles += 1;
       }
-
-      const result = analyzeFiles(filesWithContent);
-
-      saveStaticResults(result.vulnerabilities);
-      saveProject({
-        owner,
-        repo,
-        url: repoData.html_url,
-        name: repoData.name,
-        language: repoData.language,
-        scannedFiles: result.scannedFiles,
-        scanDuration: result.scanDuration,
-        severityCounts: result.severityCounts,
-        analyzedAt: new Date().toISOString(),
-      });
-      setAnalysisResults(result.vulnerabilities);
-      setAiResults([]);
-      setReviewResults([]);
-      setActiveStage("ai");
-      setMessage(
-        `${result.scannedFiles} files scanned. ${result.vulnerabilities.length} static findings detected.`,
-      );
-    } catch (error) {
-      setMessage(error.message || "Repository analysis failed.");
-    } finally {
-      setLoading(false);
     }
+
+    if (filesWithContent.length === 0) {
+      throw new Error(
+        "No readable source files were found. Select a file in the explorer and run the workflow again.",
+      );
+    }
+
+    const result = analyzeFiles(filesWithContent);
+
+    saveStaticFindingSet({
+      fileName: targetName,
+      vulnerabilities: result.vulnerabilities,
+    });
+    saveProject({
+      owner,
+      repo,
+      url: repoData.html_url,
+      name: targetName,
+      language: result.language || repoData.language,
+      scannedFiles: result.scannedFiles,
+      scanDuration: result.scanDuration,
+      severityCounts: result.severityCounts,
+      analyzedAt: new Date().toISOString(),
+    });
+    setAnalysisLanguage(result.language || repoData.language || "Unknown");
+
+    return {
+      ...result,
+      scanFileName: targetName,
+      skippedLargeFiles,
+      skippedUnreadableFiles,
+    };
   };
 
-  const handleAIAnalysis = async () => {
-    if (analysisResults.length === 0) {
-      setMessage("Run static analysis before AI analysis.");
-      return;
-    }
-
+  // GitHub Connect의 핵심 워크플로우입니다.
+  // 1. 정적 분석으로 후보 취약점을 찾고
+  // 2. AI 분석으로 공격 가능성과 수정 방법을 보강한 뒤
+  // 3. 오탐 검토로 실제 조치할 항목만 남기고
+  // 4. 리포트 화면으로 넘길 최종 결과를 저장합니다.
+  const handleRunFullWorkflow = async () => {
     try {
       setLoading(true);
+      setWorkflowStatus({
+        static: "running",
+        ai: "waiting",
+        review: "waiting",
+        report: "waiting",
+      });
+
+      const staticResult =
+        selectedFile && fileContent
+          ? runSelectedFileStaticAnalysis()
+          : await runRepositoryStaticAnalysis();
+      setAnalysisResults(staticResult.vulnerabilities);
+      setAiResults([]);
+      setReviewResults([]);
+
+      setWorkflowStatus({
+        static: "done",
+        ai: "running",
+        review: "waiting",
+        report: "waiting",
+      });
       setMessage("Running AI path analysis.");
 
-      const result = await runAIAnalysis(fileContent, analysisResults);
+      const aiResult = await runAIAnalysis("", staticResult.vulnerabilities);
+      setAiResults(aiResult);
+      saveAiResults(aiResult);
 
-      setAiResults(result);
-      setReviewResults([]);
-      saveAiResults(result);
-      setActiveStage("review");
-      setMessage(`${result.length} findings reviewed by AI.`);
+      setWorkflowStatus({
+        static: "done",
+        ai: "done",
+        review: "running",
+        report: "waiting",
+      });
+
+      const reviewed = runFalsePositiveReview(aiResult);
+      const realOnly = reviewed.filter(isRealFinding);
+      const falsePositiveCount = reviewed.length - realOnly.length;
+      setReviewResults(reviewed);
+      saveFalsePositiveResults(reviewed);
+      updateLatestScanFromFindings({
+        fileName: staticResult.scanFileName,
+        vulnerabilities: realOnly,
+        falsePositiveCount,
+      });
+
+      setWorkflowStatus({
+        static: "done",
+        ai: "done",
+        review: "done",
+        report: "ready",
+      });
+      setMessage(
+        `Workflow complete. ${staticResult.scannedFiles} files scanned, ${realOnly.length} actionable findings remain.${
+          staticResult.skippedLargeFiles > 0
+            ? ` ${staticResult.skippedLargeFiles} large files skipped.`
+            : ""
+        }${
+          staticResult.skippedUnreadableFiles > 0
+            ? ` ${staticResult.skippedUnreadableFiles} unreadable files skipped.`
+            : ""
+        }`,
+      );
     } catch (error) {
-      setMessage(error.message || "AI analysis failed.");
+      setMessage(error.message || "Workflow failed.");
+      setWorkflowStatus((current) => ({
+        ...current,
+        [Object.keys(current).find((key) => current[key] === "running") || "static"]:
+          "error",
+      }));
     } finally {
       setLoading(false);
+      setScanProgress(null);
     }
-  };
-
-  const handleFalsePositiveReview = () => {
-    if (aiResults.length === 0) {
-      setMessage("Run AI analysis before false-positive review.");
-      return;
-    }
-
-    const reviewed = runFalsePositiveReview(aiResults);
-    const realOnly = reviewed.filter((item) => item.status === "REAL");
-
-    setReviewResults(reviewed);
-    saveFalsePositiveResults(reviewed);
-    saveAiResults(realOnly);
-    setActiveStage("report");
-    setMessage(
-      `${realOnly.length} real findings remain. ${reviewed.length - realOnly.length} false positives filtered.`,
-    );
   };
 
   const goBack = async () => {
     const parentPath = currentPath.split("/").slice(0, -1).join("/");
+    setSelectedFile("");
+    setFileContent("");
     await loadContents(owner, repo, parentPath);
   };
 
   const workflow = [
     {
       key: "static",
-      title: "1. Static",
+      title: "Static Analysis",
       count: analysisResults.length,
-      ready: Boolean(repoData),
+      status: workflowStatus.static,
     },
     {
       key: "ai",
-      title: "2. AI",
+      title: "AI Analysis",
       count: aiResults.length,
-      ready: analysisResults.length > 0,
+      status: workflowStatus.ai,
     },
     {
       key: "review",
-      title: "3. Review",
-      count: reviewResults.length,
-      ready: aiResults.length > 0,
+      title: "Review",
+      count: reviewResults.length - reviewResults.filter(isRealFinding).length,
+      status: workflowStatus.review,
     },
     {
       key: "report",
-      title: "4. Report",
-      count: reviewResults.filter((item) => item.status === "REAL").length,
-      ready: reviewResults.length > 0,
+      title: "Report",
+      count: reviewResults.filter(isRealFinding).length,
+      status: workflowStatus.report,
     },
   ];
+  const visibleResults =
+    reviewResults.length > 0 ? reviewResults.filter(isRealFinding) : analysisResults;
+
+  const getStatusText = (step) => {
+    if (step.status === "running") return "Running";
+    if (step.status === "done" && step.key === "review") {
+      return `${step.count} filtered`;
+    }
+    if (step.status === "done" && step.key === "report") {
+      return `${step.count} final`;
+    }
+    if (step.status === "done") return `${step.count} items`;
+    if (step.status === "ready" && step.key === "report") {
+      return `${step.count} final`;
+    }
+    if (step.status === "ready") return "Ready";
+    if (step.status === "error") return "Failed";
+    return "Waiting";
+  };
+
+  const getStatusStyle = (status) => {
+    if (status === "running") {
+      return {
+        borderColor: "rgba(96,165,250,.45)",
+        background: "rgba(37,99,235,.2)",
+      };
+    }
+
+    if (status === "done" || status === "ready") {
+      return {
+        borderColor: "rgba(34,197,94,.34)",
+        background: "rgba(34,197,94,.1)",
+      };
+    }
+
+    if (status === "error") {
+      return {
+        borderColor: "rgba(239,68,68,.42)",
+        background: "rgba(239,68,68,.1)",
+      };
+    }
+
+    return {
+      borderColor: "rgba(96,165,250,.16)",
+      background: "rgba(15,23,42,.58)",
+    };
+  };
 
   return (
     <Box sx={{ minWidth: 0 }}>
@@ -301,7 +595,6 @@ export default function GithubConnect() {
                 type="submit"
                 variant="contained"
                 startIcon={<GitHubIcon />}
-                onClick={handleConnect}
                 disabled={loading || !repoUrl.trim()}
                 sx={{ minWidth: 140 }}
               >
@@ -311,6 +604,35 @@ export default function GithubConnect() {
           </Box>
 
           {loading && <LinearProgress sx={{ mt: 2 }} />}
+          {scanProgress && (
+            <Box sx={{ mt: 2 }}>
+              <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, mb: 0.75 }}>
+                <Typography color="text.secondary" fontSize={13}>
+                  Scanning {scanProgress.current} / {scanProgress.total}
+                </Typography>
+                {scanProgress.skippedLargeFiles > 0 && (
+                  <Typography color="text.secondary" fontSize={13}>
+                    Skipped {scanProgress.skippedLargeFiles} large files
+                  </Typography>
+                )}
+              </Box>
+              <LinearProgress
+                variant="determinate"
+                value={
+                  scanProgress.total > 0
+                    ? Math.round((scanProgress.current / scanProgress.total) * 100)
+                    : 0
+                }
+              />
+              <Typography
+                color="text.secondary"
+                fontSize={12}
+                sx={{ mt: 0.75, overflowWrap: "anywhere" }}
+              >
+                {scanProgress.fileName}
+              </Typography>
+            </Box>
+          )}
           {message && <Alert sx={{ mt: 2 }}>{message}</Alert>}
         </CardContent>
       </Card>
@@ -333,7 +655,7 @@ export default function GithubConnect() {
                     {repoData.name}
                   </Typography>
                   <Stack direction="row" gap={1} flexWrap="wrap" sx={{ mt: 1 }}>
-                    <Chip label={repoData.language || "Unknown"} />
+                    <Chip label={analysisLanguage || repoData.language || "Unknown"} />
                     <Chip label={`Stars ${repoData.stargazers_count}`} />
                     <Chip label={`Forks ${repoData.forks_count}`} />
                     <Chip label={repoData.private ? "Private" : "Public"} />
@@ -344,32 +666,16 @@ export default function GithubConnect() {
                   <Button
                     variant="contained"
                     startIcon={<PlayArrowIcon />}
-                    onClick={handleAnalyzeRepository}
+                    onClick={handleRunFullWorkflow}
                     disabled={loading}
                   >
-                    Static Analysis
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    startIcon={<AutoFixHighIcon />}
-                    onClick={handleAIAnalysis}
-                    disabled={loading || analysisResults.length === 0}
-                  >
-                    AI Analysis
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    startIcon={<FactCheckIcon />}
-                    onClick={handleFalsePositiveReview}
-                    disabled={loading || aiResults.length === 0}
-                  >
-                    Review
+                    {loading ? "Running Workflow" : "Run Full Workflow"}
                   </Button>
                   <Button
                     variant="outlined"
                     startIcon={<AssessmentIcon />}
                     onClick={() => navigate("/report")}
-                    disabled={reviewResults.length === 0}
+                    disabled={workflowStatus.report !== "ready"}
                   >
                     Report
                   </Button>
@@ -388,23 +694,23 @@ export default function GithubConnect() {
                   mt: 3,
                 }}
               >
-                {workflow.map((step) => (
+                {workflow.map((step, index) => (
                   <Box
                     key={step.key}
                     sx={{
-                      p: 1.5,
+                      p: 1.75,
                       borderRadius: 2,
-                      border: "1px solid rgba(96,165,250,.16)",
-                      background:
-                        activeStage === step.key
-                          ? "rgba(37,99,235,.2)"
-                          : "rgba(15,23,42,.58)",
+                      border: "1px solid",
                       minWidth: 0,
+                      ...getStatusStyle(step.status),
                     }}
                   >
-                    <Typography fontWeight={800}>{step.title}</Typography>
+                    <Typography color="text.secondary" fontSize={12} fontWeight={800}>
+                      STEP {index + 1}
+                    </Typography>
+                    <Typography fontWeight={900}>{step.title}</Typography>
                     <Typography color="text.secondary" fontSize={13}>
-                      {step.ready ? `${step.count} items` : "Waiting"}
+                      {getStatusText(step)}
                     </Typography>
                   </Box>
                 ))}
@@ -440,7 +746,7 @@ export default function GithubConnect() {
                       key={file.path}
                       onClick={() => {
                         if (file.type === "dir") {
-                          loadContents(owner, repo, file.path);
+                          handleDirectoryClick(file.path);
                         } else {
                           handleFileClick(file.path);
                         }
@@ -502,35 +808,24 @@ export default function GithubConnect() {
                     Workflow Results
                   </Typography>
 
-                  {analysisResults.length === 0 ? (
-                    <Typography color="text.secondary">No static results yet.</Typography>
+                  {visibleResults.length === 0 ? (
+                    <Typography color="text.secondary">
+                      {reviewResults.length > 0
+                        ? "No final vulnerabilities remain after false-positive review."
+                        : "No static results yet."}
+                    </Typography>
                   ) : (
-                    analysisResults.map((vuln, index) => (
-                      <Card
+                    visibleResults.map((vuln, index) => (
+                      <VulnerabilityCard
                         key={`${vuln.filePath}-${vuln.line}-${index}`}
-                        sx={{ mb: 2, p: 2, minWidth: 0 }}
+                        vulnerability={vuln}
+                        onClick={() => setSelectedVulnerability(vuln)}
                       >
-                        <Box
-                          sx={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            gap: 1,
-                            flexWrap: "wrap",
-                          }}
-                        >
-                          <Typography fontWeight="bold" sx={{ overflowWrap: "anywhere" }}>
-                            {vuln.type}
-                          </Typography>
-                          <Chip size="small" label={vuln.severity} />
-                        </Box>
-                        <Typography color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
-                          {vuln.filePath}:{vuln.line}
-                        </Typography>
                         <Typography>CWE: {vuln.cwe}</Typography>
                         <Typography sx={{ overflowWrap: "anywhere" }}>
                           {vuln.description}
                         </Typography>
-                      </Card>
+                      </VulnerabilityCard>
                     ))
                   )}
                 </CardContent>
@@ -539,6 +834,11 @@ export default function GithubConnect() {
           </Box>
         </>
       )}
+
+      <VulnerabilityDetailDialog
+        vulnerability={selectedVulnerability}
+        onClose={() => setSelectedVulnerability(null)}
+      />
     </Box>
   );
 }

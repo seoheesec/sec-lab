@@ -1,4 +1,11 @@
-import { getUsers, saveSession, saveUsers } from "./storageService";
+import {
+  clearAnalysisData,
+  clearSession,
+  getSession,
+  getUsers,
+  saveSession,
+  saveUsers,
+} from "./storageService";
 
 const encoder = new TextEncoder();
 const DEMO_ADMIN = {
@@ -52,6 +59,8 @@ async function hashPassword(password, saltBytes) {
   return toBase64(bits);
 }
 
+// 회원가입 시 비밀번호를 그대로 저장하지 않고,
+// salt와 PBKDF2 해시를 이용해 LocalStorage에 저장할 사용자 객체를 만듭니다.
 async function createUser({ id, email, password }) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const passwordHash = await hashPassword(password, salt);
@@ -67,8 +76,16 @@ async function createUser({ id, email, password }) {
   };
 }
 
+// 시연을 위해 admin 계정을 항상 준비합니다.
+// 실제 서비스라면 서버에서 관리자 계정을 관리해야 합니다.
 export async function ensureDemoAdmin() {
   const users = getUsers();
+  const existingAdmin = users.find((user) => user.id === DEMO_ADMIN.id);
+
+  if (existingAdmin?.passwordHash && existingAdmin?.salt) {
+    return;
+  }
+
   const admin = await createUser(DEMO_ADMIN);
   const otherUsers = users.filter((user) => user.id !== DEMO_ADMIN.id);
 
@@ -147,6 +164,10 @@ export async function login({ id, password }) {
     };
     saveUsers(users);
 
+    if (lockedUntil) {
+      throw new Error("Too many failed attempts. Try again in a few minutes.");
+    }
+
     throw new Error("The ID or password does not match.");
   }
 
@@ -169,4 +190,25 @@ export async function login({ id, password }) {
   saveSession(session);
 
   return session;
+}
+
+// 현재 로그인한 계정을 삭제합니다.
+// demo admin은 발표/시연용 계정이라 삭제하지 못하게 막았습니다.
+export function deleteCurrentAccount() {
+  const session = getSession();
+
+  if (!session) {
+    throw new Error("로그인된 사용자가 없습니다.");
+  }
+
+  if (session.user.id === DEMO_ADMIN.id) {
+    throw new Error("데모 admin 계정은 삭제할 수 없습니다.");
+  }
+
+  const users = getUsers();
+  const nextUsers = users.filter((user) => user.id !== session.user.id);
+
+  saveUsers(nextUsers);
+  clearAnalysisData();
+  clearSession();
 }

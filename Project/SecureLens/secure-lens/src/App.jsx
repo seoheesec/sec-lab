@@ -9,6 +9,7 @@ import AIAnalysis from "./pages/AIAnalysis";
 import Dashboard from "./pages/Dashboard";
 import GithubConnect from "./pages/GithubConnect";
 import Login from "./pages/Login";
+import MyPage from "./pages/MyPage";
 import Signup from "./pages/Signup";
 import StaticAnalysis from "./pages/StaticAnalysis";
 import { getSession } from "./services/storageService";
@@ -72,6 +73,8 @@ function App() {
               <Route path="/false-positive" element={<FalsePositive />} />
 
               <Route path="/report" element={<Report />} />
+
+              <Route path="/my-page" element={<MyPage />} />
 
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>

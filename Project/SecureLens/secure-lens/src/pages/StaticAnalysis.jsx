@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+
+import Editor from "@monaco-editor/react";
 
 import {
   Alert,
@@ -13,29 +15,127 @@ import {
 import BugReportIcon from "@mui/icons-material/BugReport";
 
 import PageHeader from "../components/PageHeader";
+import VulnerabilityCard from "../components/VulnerabilityCard";
+import VulnerabilityDetailDialog from "../components/VulnerabilityDetailDialog";
 import {
   demoPythonVulnerableCode,
   demoVulnerableCode,
 } from "../data/demoVulnerableCode";
-import { analyzeFiles, runStaticAnalysis } from "../services/analysisService";
-import { saveProject, saveStaticResults } from "../services/storageService";
+import {
+  analyzeFiles,
+  detectLanguageFromPath,
+  runStaticAnalysis,
+} from "../services/analysisService";
+import { saveScanFromFindings } from "../services/scanHistoryService";
+import {
+  saveAiResults,
+  saveFalsePositiveResults,
+  saveProject,
+  saveStaticResults,
+} from "../services/storageService";
+
+const EDITOR_LANGUAGE = {
+  JavaScript: "javascript",
+  TypeScript: "typescript",
+  Python: "python",
+  PHP: "php",
+  Java: "java",
+  C: "c",
+  "C++": "cpp",
+};
+
+function getEditorLanguage(language) {
+  return EDITOR_LANGUAGE[language] || "plaintext";
+}
+
+function buildUploadedCodePreview(files) {
+  if (files.length === 1) {
+    return files[0].content;
+  }
+
+  return files
+    .map(
+      (file) =>
+        `// ===== ${file.path} =====\n${file.content}`,
+    )
+    .join("\n\n");
+}
 
 export default function StaticAnalysis() {
+  const editorRef = useRef(null);
+  const monacoRef = useRef(null);
   const [projectName, setProjectName] = useState("Manual Scan");
   const [targetLanguage, setTargetLanguage] = useState("JavaScript");
   const [code, setCode] = useState("");
   const [results, setResults] = useState([]);
   const [message, setMessage] = useState("");
+  const [syntaxIssues, setSyntaxIssues] = useState([]);
+  const [selectedVulnerability, setSelectedVulnerability] = useState(null);
 
-  const saveAnalysis = ({ vulnerabilities, scannedFiles, scanDuration, language }) => {
+  const validateBasicSyntax = (source) => {
+    const pairs = [
+      ["(", ")"],
+      ["[", "]"],
+      ["{", "}"],
+    ];
+    const issues = pairs
+      .map(([open, close]) => ({
+        label: `${open}${close}`,
+        openCount: (source.match(new RegExp(`\\${open}`, "g")) || []).length,
+        closeCount: (source.match(new RegExp(`\\${close}`, "g")) || []).length,
+      }))
+      .filter((item) => item.openCount !== item.closeCount)
+      .map((item) => `${item.label} 괄호 개수가 맞지 않습니다.`);
+
+    setSyntaxIssues(issues);
+
+    if (!editorRef.current || !monacoRef.current) return;
+
+    const model = editorRef.current.getModel();
+    const markers = issues.map((issue) => ({
+      severity: monacoRef.current.MarkerSeverity.Warning,
+      message: issue,
+      startLineNumber: 1,
+      startColumn: 1,
+      endLineNumber: 1,
+      endColumn: 1,
+    }));
+
+    monacoRef.current.editor.setModelMarkers(model, "securelens", markers);
+  };
+
+  const updateCode = (value = "") => {
+    setCode(value);
+    validateBasicSyntax(value);
+  };
+
+  const handleEditorMount = (editor, monaco) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+    validateBasicSyntax(code);
+  };
+
+  const saveAnalysis = ({
+    vulnerabilities,
+    scannedFiles,
+    scanDuration,
+    language,
+    name = projectName,
+  }) => {
     setResults(vulnerabilities);
-    saveStaticResults(vulnerabilities);
     saveProject({
-      name: projectName,
+      name,
       language,
       scannedFiles,
       scanDuration,
       analyzedAt: new Date().toISOString(),
+    });
+    saveStaticResults(vulnerabilities);
+    saveAiResults([]);
+    saveFalsePositiveResults([]);
+    saveScanFromFindings({
+      fileName: name,
+      vulnerabilities,
     });
   };
 
@@ -60,7 +160,7 @@ export default function StaticAnalysis() {
   const loadDemoCode = () => {
     setProjectName("Demo Vulnerable App");
     setTargetLanguage("JavaScript");
-    setCode(demoVulnerableCode);
+    updateCode(demoVulnerableCode);
     setResults([]);
     setMessage("Demo vulnerable code loaded. Click Analyze Code to scan it.");
   };
@@ -68,7 +168,7 @@ export default function StaticAnalysis() {
   const loadPythonDemoCode = () => {
     setProjectName("Demo Python Vulnerable App");
     setTargetLanguage("Python");
-    setCode(demoPythonVulnerableCode);
+    updateCode(demoPythonVulnerableCode);
     setResults([]);
     setMessage("Demo Python vulnerable code loaded. Click Analyze Code to scan it.");
   };
@@ -81,17 +181,28 @@ export default function StaticAnalysis() {
     const files = await Promise.all(
       selectedFiles.map(async (file) => ({
         name: file.name,
-        path: file.name,
+        path: file.webkitRelativePath || file.name,
         content: await file.text(),
       })),
     );
     const result = analyzeFiles(files);
+    const uploadedProjectName =
+      files.length === 1
+        ? files[0].name
+        : files[0].path.split("/")[0] || `${files.length} uploaded files`;
+    const uploadedLanguage =
+      files.length === 1 ? detectLanguageFromPath(files[0].path) : result.language;
+
+    setProjectName(uploadedProjectName);
+    setTargetLanguage(uploadedLanguage || "Unknown");
+    updateCode(buildUploadedCodePreview(files));
 
     saveAnalysis({
       vulnerabilities: result.vulnerabilities,
       scannedFiles: result.scannedFiles,
       scanDuration: result.scanDuration,
-      language: "Uploaded Files",
+      language: uploadedLanguage || result.language,
+      name: uploadedProjectName,
     });
     setMessage(`${result.scannedFiles} files scanned. ${result.vulnerabilities.length} findings detected.`);
   };
@@ -125,14 +236,37 @@ export default function StaticAnalysis() {
             />
           </Box>
 
-          <TextField
-            label="Source Code"
-            multiline
-            minRows={12}
-            fullWidth
-            value={code}
-            onChange={(event) => setCode(event.target.value)}
-          />
+          <Box
+            sx={{
+              border: "1px solid rgba(96,165,250,.2)",
+              borderRadius: 2,
+              overflow: "hidden",
+              bgcolor: "rgba(2,6,23,.72)",
+            }}
+          >
+            <Editor
+              height="420px"
+              language={getEditorLanguage(targetLanguage)}
+              theme="vs-dark"
+              value={code}
+              onChange={updateCode}
+              onMount={handleEditorMount}
+              options={{
+                automaticLayout: true,
+                fontSize: 14,
+                lineNumbers: "on",
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                wordWrap: "on",
+              }}
+            />
+          </Box>
+
+          {syntaxIssues.length > 0 && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              {syntaxIssues.join(" ")}
+            </Alert>
+          )}
 
           <Box sx={{ display: "flex", gap: 2, mt: 2, flexWrap: "wrap" }}>
             <Button variant="contained" onClick={handleAnalyze} disabled={!code.trim()}>
@@ -147,6 +281,17 @@ export default function StaticAnalysis() {
             <Button variant="outlined" component="label">
               Upload Files
               <input hidden multiple type="file" onChange={handleFileUpload} />
+            </Button>
+            <Button variant="outlined" component="label">
+              Upload Folder
+              <input
+                hidden
+                multiple
+                type="file"
+                webkitdirectory=""
+                directory=""
+                onChange={handleFileUpload}
+              />
             </Button>
           </Box>
 
@@ -164,21 +309,24 @@ export default function StaticAnalysis() {
             <Typography color="text.secondary">No analysis results yet.</Typography>
           ) : (
             results.map((item, index) => (
-              <Card key={`${item.filePath}-${item.line}-${index}`} sx={{ p: 2, mb: 2, minWidth: 0 }}>
-                <Typography fontWeight="bold" sx={{ overflowWrap: "anywhere" }}>
-                  {item.type}
-                </Typography>
-                <Typography color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
-                  {item.filePath}:{item.line}
-                </Typography>
+              <VulnerabilityCard
+                key={`${item.filePath}-${item.line}-${index}`}
+                vulnerability={item}
+                onClick={() => setSelectedVulnerability(item)}
+              >
                 <Typography>Severity: {item.severity}</Typography>
                 <Typography>CWE: {item.cwe}</Typography>
                 <Typography sx={{ overflowWrap: "anywhere" }}>{item.description}</Typography>
-              </Card>
+              </VulnerabilityCard>
             ))
           )}
         </CardContent>
       </Card>
+
+      <VulnerabilityDetailDialog
+        vulnerability={selectedVulnerability}
+        onClose={() => setSelectedVulnerability(null)}
+      />
     </Box>
   );
 }

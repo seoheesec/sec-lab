@@ -17,6 +17,7 @@ import DescriptionIcon from "@mui/icons-material/Description";
 import AnalyticsIcon from "@mui/icons-material/Analytics";
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 import LogoutIcon from "@mui/icons-material/Logout";
+import PersonIcon from "@mui/icons-material/Person";
 import ShieldIcon from "@mui/icons-material/Shield";
 
 import { Link, useLocation } from "react-router-dom";
@@ -58,6 +59,11 @@ export default function AppLayout({ children }) {
       text: "Report",
       icon: <DescriptionIcon />,
       path: "/report",
+    },
+    {
+      text: "My Page",
+      icon: <PersonIcon />,
+      path: "/my-page",
     },
   ];
 

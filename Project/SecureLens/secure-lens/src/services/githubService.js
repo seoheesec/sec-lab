@@ -11,7 +11,52 @@ const SUPPORTED_EXTENSIONS = [
   ".h",
   ".hpp",
 ];
+const GITHUB_CACHE_KEY = "secureLensGitHubCache";
 
+// GitHub API는 비로그인 요청 제한이 낮기 때문에,
+// 한 번 가져온 저장소 정보와 파일 내용을 브라우저에 캐시해 반복 호출을 줄입니다.
+function readCache() {
+  try {
+    return JSON.parse(localStorage.getItem(GITHUB_CACHE_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCache(cache) {
+  try {
+    localStorage.setItem(GITHUB_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // If browser storage is full, keep the app usable without cache.
+  }
+}
+
+function getCachedValue(key) {
+  return readCache()[key]?.value;
+}
+
+function setCachedValue(key, value) {
+  const cache = readCache();
+
+  cache[key] = {
+    savedAt: new Date().toISOString(),
+    value,
+  };
+  writeCache(cache);
+
+  return value;
+}
+
+async function withCache(key, loader) {
+  const cached = getCachedValue(key);
+
+  if (cached) return cached;
+
+  const value = await loader();
+  return setCachedValue(key, value);
+}
+
+// 사용자가 입력한 GitHub URL에서 owner와 repo 이름만 추출합니다.
 export function parseGitHubUrl(repoUrl) {
   try {
     const url = new URL(repoUrl.trim());
@@ -36,6 +81,8 @@ export function isSupportedFile(path) {
   );
 }
 
+// GitHub API 공통 요청 함수입니다.
+// rate limit, private repo, 잘못된 URL 같은 오류를 사용자가 이해할 수 있는 메시지로 바꿉니다.
 async function requestGitHub(url) {
   const response = await fetch(url, {
     headers: {
@@ -73,7 +120,9 @@ async function requestGitHub(url) {
 }
 
 export async function fetchRepository(owner, repo) {
-  return requestGitHub(`https://api.github.com/repos/${owner}/${repo}`);
+  return withCache(`repo:${owner}/${repo}`, () =>
+    requestGitHub(`https://api.github.com/repos/${owner}/${repo}`),
+  );
 }
 
 export async function fetchContents(owner, repo, path = "") {
@@ -84,12 +133,18 @@ export async function fetchContents(owner, repo, path = "") {
     .join("/");
   const suffix = encodedPath ? `/${encodedPath}` : "";
 
-  return requestGitHub(
-    `https://api.github.com/repos/${owner}/${repo}/contents${suffix}`,
+  return withCache(`contents:${owner}/${repo}:${path || "root"}`, () =>
+    requestGitHub(
+      `https://api.github.com/repos/${owner}/${repo}/contents${suffix}`,
+    ),
   );
 }
 
 export async function fetchFileContent(owner, repo, path) {
+  const cached = getCachedValue(`file:${owner}/${repo}:${path}`);
+
+  if (cached) return cached;
+
   const data = await fetchContents(owner, repo, path);
 
   if (!data.content) {
@@ -99,12 +154,18 @@ export async function fetchFileContent(owner, repo, path) {
   const binary = atob(data.content.replace(/\n/g, ""));
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
 
-  return new TextDecoder("utf-8").decode(bytes);
+  return setCachedValue(
+    `file:${owner}/${repo}:${path}`,
+    new TextDecoder("utf-8").decode(bytes),
+  );
 }
 
+// 저장소 전체를 분석할 때는 Git tree API로 파일 목록을 한 번에 가져옵니다.
 export async function fetchRepositoryTree(owner, repo, branch = "HEAD") {
-  const data = await requestGitHub(
-    `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+  const data = await withCache(`tree:${owner}/${repo}:${branch}`, () =>
+    requestGitHub(
+      `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+    ),
   );
 
   return (data.tree || [])
@@ -116,6 +177,10 @@ export async function fetchRepositoryTree(owner, repo, branch = "HEAD") {
     }));
 }
 
+export function clearGitHubCache() {
+  localStorage.removeItem(GITHUB_CACHE_KEY);
+}
+
 export async function collectRepositoryFiles(
   owner,
   repo,
@@ -125,6 +190,7 @@ export async function collectRepositoryFiles(
 ) {
   const collected = [];
 
+  // 루트 저장소 분석은 recursive tree API를 사용해 빠르게 파일 목록을 모읍니다.
   if (!path) {
     const treeFiles = await fetchRepositoryTree(owner, repo, branch);
     return treeFiles.slice(0, limit);
@@ -139,6 +205,7 @@ export async function collectRepositoryFiles(
     for (const item of list) {
       if (collected.length >= limit) break;
 
+      // 폴더를 선택한 경우에는 내부 폴더를 재귀적으로 따라 내려갑니다.
       if (item.type === "dir") {
         await walk(item.path);
       }

@@ -13,6 +13,8 @@ import {
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 
 import PageHeader from "../components/PageHeader";
+import VulnerabilityCard from "../components/VulnerabilityCard";
+import VulnerabilityDetailDialog from "../components/VulnerabilityDetailDialog";
 import { runAIAnalysis } from "../services/aiAnalysisService";
 import { getStaticResults, saveAiResults } from "../services/storageService";
 
@@ -20,6 +22,7 @@ export default function AIAnalysis() {
   const [results, setResults] = useState([]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selectedVulnerability, setSelectedVulnerability] = useState(null);
 
   const handleAnalyze = async () => {
     const staticResults = getStaticResults();
@@ -38,6 +41,8 @@ export default function AIAnalysis() {
       setResults(aiResults);
       saveAiResults(aiResults);
       setMessage(`${aiResults.length} findings reviewed by AI.`);
+    } catch {
+      setMessage("AI 분석 중 오류가 발생했습니다. 정적 분석 결과를 다시 확인해 주세요.");
     } finally {
       setLoading(false);
     }
@@ -76,23 +81,26 @@ export default function AIAnalysis() {
             <Typography color="text.secondary">No AI analysis results yet.</Typography>
           ) : (
             results.map((item, index) => (
-              <Card key={`${item.filePath}-${item.line}-${index}`} sx={{ p: 2, mb: 2, minWidth: 0 }}>
-                <Typography fontWeight="bold" sx={{ overflowWrap: "anywhere" }}>
-                  {item.type}
-                </Typography>
-                <Typography color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
-                  {item.filePath}:{item.line}
-                </Typography>
+              <VulnerabilityCard
+                key={`${item.filePath}-${item.line}-${index}`}
+                vulnerability={item}
+                onClick={() => setSelectedVulnerability(item)}
+              >
                 <Typography>Exploitable: {item.isExploitable ? "YES" : "NO"}</Typography>
                 <Typography>Severity: {item.severity}</Typography>
                 <Typography sx={{ overflowWrap: "anywhere" }}>Attack Path: {item.attackPath}</Typography>
                 <Typography sx={{ overflowWrap: "anywhere" }}>Reason: {item.reason}</Typography>
                 <Typography sx={{ overflowWrap: "anywhere" }}>Fix: {item.fix}</Typography>
-              </Card>
+              </VulnerabilityCard>
             ))
           )}
         </CardContent>
       </Card>
+
+      <VulnerabilityDetailDialog
+        vulnerability={selectedVulnerability}
+        onClose={() => setSelectedVulnerability(null)}
+      />
     </Box>
   );
 }

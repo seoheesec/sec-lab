@@ -1,9 +1,26 @@
+import { useEffect, useState } from "react";
+
 import { Box, Card, CardContent, Chip, Typography } from "@mui/material";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
 import PageHeader from "../components/PageHeader";
-import { getAiResults, getProject, getStaticResults } from "../services/storageService";
-import { getVulnerabilityInfo } from "../services/vulnerabilityInfo";
+import StatCard from "../components/StatCard";
+import VulnerabilityCard from "../components/VulnerabilityCard";
+import VulnerabilityDetailDialog from "../components/VulnerabilityDetailDialog";
+import {
+  isRealFinding,
+  normalizeSeverity,
+} from "../services/falsePositiveService";
+import {
+  getAiResults,
+  getFalsePositiveResults,
+  getProject,
+  getStaticResults,
+  SECURE_LENS_STORAGE_EVENT,
+} from "../services/storageService";
+import {
+  getVulnerabilityInfo,
+} from "../services/vulnerabilityInfo";
 
 const COLORS = {
   HIGH: "#ef4444",
@@ -24,14 +41,43 @@ function calculateGrade(score) {
 }
 
 export default function Dashboard() {
-  const aiResults = getAiResults();
-  const staticResults = getStaticResults();
-  const project = getProject();
-  const finalResults = aiResults.length > 0 ? aiResults : staticResults;
+  const [selectedVulnerability, setSelectedVulnerability] = useState(null);
+  const [dashboardData, setDashboardData] = useState(() => ({
+    aiResults: getAiResults(),
+    reviewed: getFalsePositiveResults(),
+    staticResults: getStaticResults(),
+    project: getProject(),
+  }));
 
-  const highCount = finalResults.filter((item) => item.severity === "HIGH").length;
-  const mediumCount = finalResults.filter((item) => item.severity === "MEDIUM").length;
-  const lowCount = finalResults.filter((item) => item.severity === "LOW").length;
+  useEffect(() => {
+    const refreshDashboard = () => {
+      setDashboardData({
+        aiResults: getAiResults(),
+        reviewed: getFalsePositiveResults(),
+        staticResults: getStaticResults(),
+        project: getProject(),
+      });
+    };
+
+    window.addEventListener(SECURE_LENS_STORAGE_EVENT, refreshDashboard);
+    window.addEventListener("storage", refreshDashboard);
+    window.addEventListener("focus", refreshDashboard);
+
+    return () => {
+      window.removeEventListener(SECURE_LENS_STORAGE_EVENT, refreshDashboard);
+      window.removeEventListener("storage", refreshDashboard);
+      window.removeEventListener("focus", refreshDashboard);
+    };
+  }, []);
+
+  const { aiResults, reviewed, staticResults, project } = dashboardData;
+  const reviewedRealResults = reviewed.filter(isRealFinding);
+  const finalResults =
+    reviewed.length > 0 ? reviewedRealResults : aiResults.length > 0 ? aiResults : staticResults;
+
+  const highCount = finalResults.filter((item) => normalizeSeverity(item.severity) === "HIGH").length;
+  const mediumCount = finalResults.filter((item) => normalizeSeverity(item.severity) === "MEDIUM").length;
+  const lowCount = finalResults.filter((item) => normalizeSeverity(item.severity) === "LOW").length;
   const total = finalResults.length;
   const score = calculateScore({ highCount, mediumCount, lowCount });
   const grade = calculateGrade(score);
@@ -83,16 +129,12 @@ export default function Dashboard() {
         }}
       >
         {statCards.map(([label, value]) => (
-          <Card key={label} sx={{ minWidth: 0 }}>
-            <CardContent>
-              <Typography color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
-                {label}
-              </Typography>
-              <Typography variant={label === "Security Grade" ? "h3" : "h4"} fontWeight="bold">
-                {value}
-              </Typography>
-            </CardContent>
-          </Card>
+          <StatCard
+            key={label}
+            label={label}
+            value={value}
+            valueVariant={label === "Security Grade" ? "h3" : "h4"}
+          />
         ))}
       </Box>
 
@@ -133,23 +175,11 @@ export default function Dashboard() {
               const info = getVulnerabilityInfo(vuln.type);
 
               return (
-                <Card key={`${vuln.filePath}-${vuln.line}-${index}`} sx={{ p: 2, mb: 2, minWidth: 0 }}>
-                  <Box
-                    sx={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 2,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <Typography variant="h6" fontWeight="bold" sx={{ overflowWrap: "anywhere" }}>
-                      {vuln.type}
-                    </Typography>
-                    <Chip label={vuln.severity} color={vuln.severity === "HIGH" ? "error" : "default"} />
-                  </Box>
-                  <Typography color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
-                    {vuln.filePath}:{vuln.line}
-                  </Typography>
+                <VulnerabilityCard
+                  key={`${vuln.filePath}-${vuln.line}-${index}`}
+                  vulnerability={vuln}
+                  onClick={() => setSelectedVulnerability(vuln)}
+                >
                   <Typography>CWE: {vuln.cwe || info.cwe}</Typography>
                   <Typography sx={{ mt: 1, overflowWrap: "anywhere" }}>{info.summary}</Typography>
                   {vuln.attackPath && (
@@ -160,12 +190,17 @@ export default function Dashboard() {
                   <Typography sx={{ mt: 1, overflowWrap: "anywhere" }}>
                     Fix: {vuln.fix || info.fix.join(", ")}
                   </Typography>
-                </Card>
+                </VulnerabilityCard>
               );
             })
           )}
         </CardContent>
       </Card>
+
+      <VulnerabilityDetailDialog
+        vulnerability={selectedVulnerability}
+        onClose={() => setSelectedVulnerability(null)}
+      />
     </Box>
   );
 }

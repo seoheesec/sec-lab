@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 
@@ -6,23 +8,55 @@ import { Box, Button, Card, CardContent, Chip, Typography } from "@mui/material"
 import DownloadIcon from "@mui/icons-material/Download";
 
 import PageHeader from "../components/PageHeader";
+import VulnerabilityCard from "../components/VulnerabilityCard";
+import VulnerabilityDetailDialog from "../components/VulnerabilityDetailDialog";
+import {
+  isFalsePositiveFinding,
+  isRealFinding,
+} from "../services/falsePositiveService";
 import {
   getAiResults,
   getFalsePositiveResults,
   getProject,
   getStaticResults,
+  SECURE_LENS_STORAGE_EVENT,
 } from "../services/storageService";
-import { getVulnerabilityInfo } from "../services/vulnerabilityInfo";
+import {
+  getVulnerabilityInfo,
+} from "../services/vulnerabilityInfo";
+
+function loadReportData() {
+  return {
+    project: getProject(),
+    aiResults: getAiResults(),
+    staticResults: getStaticResults(),
+    reviewed: getFalsePositiveResults(),
+  };
+}
 
 export default function Report() {
-  const project = getProject();
-  const aiResults = getAiResults();
-  const staticResults = getStaticResults();
-  const reviewed = getFalsePositiveResults();
-  const finalResults = aiResults.length > 0 ? aiResults : staticResults;
-  const falsePositiveCount = reviewed.filter(
-    (item) => item.status === "FALSE_POSITIVE",
-  ).length;
+  const [reportData, setReportData] = useState(loadReportData);
+  const [selectedVulnerability, setSelectedVulnerability] = useState(null);
+
+  useEffect(() => {
+    const refresh = () => setReportData(loadReportData());
+
+    window.addEventListener(SECURE_LENS_STORAGE_EVENT, refresh);
+    window.addEventListener("storage", refresh);
+    window.addEventListener("focus", refresh);
+
+    return () => {
+      window.removeEventListener(SECURE_LENS_STORAGE_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
+
+  const { project, aiResults, staticResults, reviewed } = reportData;
+  const reviewedRealResults = reviewed.filter(isRealFinding);
+  const finalResults =
+    reviewed.length > 0 ? reviewedRealResults : aiResults.length > 0 ? aiResults : staticResults;
+  const falsePositiveCount = reviewed.filter(isFalsePositiveFinding).length;
 
   const generatePDF = async () => {
     const report = document.getElementById("report");
@@ -86,14 +120,11 @@ export default function Report() {
               const info = getVulnerabilityInfo(vuln.type);
 
               return (
-                <Card key={`${vuln.filePath}-${vuln.line}-${index}`} sx={{ p: 2, mb: 2, minWidth: 0 }}>
-                  <Typography fontWeight="bold" sx={{ overflowWrap: "anywhere" }}>
-                    {vuln.type}
-                  </Typography>
-                  <Typography color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
-                    {vuln.filePath}:{vuln.line}
-                  </Typography>
-                  <Typography>Severity: {vuln.severity}</Typography>
+                <VulnerabilityCard
+                  key={`${vuln.filePath}-${vuln.line}-${index}`}
+                  vulnerability={vuln}
+                  onClick={() => setSelectedVulnerability(vuln)}
+                >
                   <Typography>CWE: {vuln.cwe || info.cwe}</Typography>
                   <Typography sx={{ overflowWrap: "anywhere" }}>Summary: {info.summary}</Typography>
                   <Typography sx={{ overflowWrap: "anywhere" }}>
@@ -102,7 +133,7 @@ export default function Report() {
                   <Typography sx={{ overflowWrap: "anywhere" }}>
                     Fix: {vuln.fix || info.fix.join(", ")}
                   </Typography>
-                </Card>
+                </VulnerabilityCard>
               );
             })
           )}
@@ -117,6 +148,11 @@ export default function Report() {
           </Typography>
         </CardContent>
       </Card>
+
+      <VulnerabilityDetailDialog
+        vulnerability={selectedVulnerability}
+        onClose={() => setSelectedVulnerability(null)}
+      />
     </Box>
   );
 }
